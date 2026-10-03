@@ -1,0 +1,320 @@
+package main;
+
+import logic.FactoryManager;
+import logic.SafetyProtocol;
+import models.*;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class Main {
+
+    private static int variant = 1;
+    private static final String STATE_FILE = "factory_state.dat";
+
+    public static void main(String[] args) {
+        FactoryManager manager = new FactoryManager();
+        manager.loadState(STATE_FILE);
+
+        Scanner scanner = new Scanner(System.in);
+
+        // ---- Выбор варианта ----
+        System.out.println("=== Система управления «Умным заводом» ===");
+        System.out.println("Выберите вариант (1–8):");
+        for (int i = 1; i <= 8; i++) {
+            System.out.println(i + ". " + getVariantDescription(i));
+        }
+        System.out.print("Ваш вариант: ");
+        try {
+            variant = Integer.parseInt(scanner.nextLine().trim());
+            if (variant < 1 || variant > 8) variant = 1;
+        } catch (NumberFormatException e) {
+            variant = 1;
+        }
+        System.out.println("Выбран вариант " + variant + ": " + getVariantDescription(variant));
+
+        // ---- Главный цикл ----
+        boolean running = true;
+        while (running) {
+            printMenu();
+            String choice = scanner.nextLine().trim();
+
+            switch (choice) {
+                case "1": addEquipment(scanner, manager); break;
+                case "2": toggleEquipment(scanner, manager); break;
+                case "3": addPhantomHeatProtocol(manager); break;
+                case "4": addVariantProtocol(manager); break;
+                case "5": manager.applyAllProtocols(); break;
+                case "6": runVariantAnalytics(manager); break;
+                case "7":
+                    manager.saveState(STATE_FILE);
+                    System.out.println("Выход из программы.");
+                    running = false;
+                    break;
+                default:
+                    System.out.println("Неверный пункт. Попробуйте снова.");
+            }
+        }
+        scanner.close();
+    }
+
+    private static void printMenu() {
+        System.out.println("\n--- Меню ---");
+        System.out.println("1. Добавить оборудование в цех");
+        System.out.println("2. Запустить/остановить оборудование");
+        System.out.println("3. Добавить протокол «Сброс фантомного нагрева»");
+        System.out.println("4. Добавить протокол варианта " + variant);
+        System.out.println("5. Запустить проверку всех протоколов");
+        System.out.println("6. Аналитика варианта " + variant);
+        System.out.println("7. Сохранить и выйти");
+        System.out.print("Выберите пункт: ");
+    }
+
+    // ================= ПУНКТ 1 =================
+    private static void addEquipment(Scanner scanner, FactoryManager manager) {
+        System.out.print("Тип (1-RoboticArm, 2-ConveyorBelt, 3-HydraulicPress): ");
+        String type = scanner.nextLine().trim();
+
+        System.out.print("ID: ");
+        String id = scanner.nextLine().trim();
+        System.out.print("Имя: ");
+        String name = scanner.nextLine().trim();
+        System.out.print("Цех: ");
+        String workshop = scanner.nextLine().trim();
+
+        double temperature = readDouble(scanner, "Температура (°C): ");
+
+        FactoryEquipment equipment = null;
+        switch (type) {
+            case "1":
+                double payload = readDouble(scanner, "Нагрузка (кг): ");
+                equipment = new RoboticArm(id, name, temperature, payload);
+                break;
+            case "2":
+                double speed = readDouble(scanner, "Скорость (м/с): ");
+                equipment = new ConveyorBelt(id, name, temperature, speed);
+                break;
+            case "3":
+                double pressure = readDouble(scanner, "Давление (МПа): ");
+                equipment = new HydraulicPress(id, name, temperature, pressure);
+                break;
+            default:
+                System.out.println("Неверный тип.");
+                return;
+        }
+
+        manager.addEquipment(workshop, equipment);
+        System.out.println("Оборудование добавлено в цех «" + workshop + "».");
+    }
+
+    private static double readDouble(Scanner scanner, String prompt) {
+        System.out.print(prompt);
+        try {
+            return Double.parseDouble(scanner.nextLine().trim().replace(',', '.'));
+        } catch (NumberFormatException e) {
+            System.out.println("Некорректное число, установлено 0.0");
+            return 0.0;
+        }
+    }
+
+    // ================= ПУНКТ 2 =================
+    private static void toggleEquipment(Scanner scanner, FactoryManager manager) {
+        System.out.print("ID оборудования: ");
+        String id = scanner.nextLine().trim();
+        FactoryEquipment eq = manager.getEquipmentById(id);
+        if (eq == null) {
+            System.out.println("Оборудование не найдено.");
+            return;
+        }
+        System.out.println("Текущий статус: " + (eq.isWorking() ? "Работает" : "Остановлено"));
+        System.out.print("Команда (start/stop): ");
+        String cmd = scanner.nextLine().trim().toLowerCase();
+        if (cmd.equals("start")) {
+            eq.startWork();
+            System.out.println("Оборудование запущено.");
+        } else if (cmd.equals("stop")) {
+            eq.stopWork();
+            System.out.println("Оборудование остановлено.");
+        } else {
+            System.out.println("Неверная команда.");
+        }
+    }
+
+    // ================= ПУНКТ 3 =================
+    private static void addPhantomHeatProtocol(FactoryManager manager) {
+        SafetyProtocol<FactoryEquipment> phantom = new SafetyProtocol<>(
+                "Сброс фантомного нагрева",
+                eq -> !eq.isWorking() && eq.getTemperature() > 20.0,
+                eq -> eq.setTemperature(20.0)
+        );
+        manager.addProtocol(phantom);
+        System.out.println("Протокол «Сброс фантомного нагрева» добавлен.");
+    }
+
+    // ================= ПУНКТ 4 — ВАРИАНТЫ 1–8 =================
+    private static void addVariantProtocol(FactoryManager manager) {
+        switch (variant) {
+            case 1 -> {
+                SafetyProtocol<RoboticArm> p = new SafetyProtocol<>(
+                        "Перегрев робота (Вариант 1)",
+                        arm -> arm.isWorking() && arm.getTemperature() > 85.0,
+                        RoboticArm::stopWork
+                );
+                manager.addProtocol(p);
+                System.out.println("Добавлен протокол: Перегрев робота.");
+            }
+            case 2 -> {
+                SafetyProtocol<ConveyorBelt> p = new SafetyProtocol<>(
+                        "Безопасная скорость (Вариант 2)",
+                        belt -> belt.isWorking() && belt.getSpeed() > 15.0,
+                        belt -> belt.setSpeed(10.0)
+                );
+                manager.addProtocol(p);
+                System.out.println("Добавлен протокол: Безопасная скорость.");
+            }
+            case 3 -> {
+                SafetyProtocol<HydraulicPress> p = new SafetyProtocol<>(
+                        "Сброс давления (Вариант 3)",
+                        press -> !press.isWorking() && press.getPressure() > 0.0,
+                        press -> press.setPressure(0.0)
+                );
+                manager.addProtocol(p);
+                System.out.println("Добавлен протокол: Сброс давления.");
+            }
+            case 4 -> {
+                SafetyProtocol<FactoryEquipment> p = new SafetyProtocol<>(
+                        "Экстренная остановка (Вариант 4)",
+                        eq -> eq.isWorking() && eq.getTemperature() > 100.0,
+                        FactoryEquipment::stopWork
+                );
+                manager.addProtocol(p);
+                System.out.println("Добавлен протокол: Экстренная остановка.");
+            }
+            case 5 -> {
+                SafetyProtocol<RoboticArm> p = new SafetyProtocol<>(
+                        "Очистка захвата (Вариант 5)",
+                        arm -> !arm.isWorking() && arm.getCurrentPayload() > 0.0,
+                        arm -> arm.setCurrentPayload(0.0)
+                );
+                manager.addProtocol(p);
+                System.out.println("Добавлен протокол: Очистка захвата.");
+            }
+            case 6 -> {
+                SafetyProtocol<ConveyorBelt> p = new SafetyProtocol<>(
+                        "Профилактика конвейеров (Вариант 6)",
+                        belt -> belt.getName().contains("Main") && !belt.isWorking(),
+                        ConveyorBelt::startWork
+                );
+                manager.addProtocol(p);
+                System.out.println("Добавлен протокол: Профилактика конвейеров.");
+            }
+            case 7 -> {
+                SafetyProtocol<HydraulicPress> p = new SafetyProtocol<>(
+                        "Защита пресса (Вариант 7)",
+                        press -> press.isWorking() && press.getPressure() > 500.0,
+                        press -> {
+                            press.stopWork();
+                            press.setPressure(0.0);
+                        }
+                );
+                manager.addProtocol(p);
+                System.out.println("Добавлен протокол: Защита пресса.");
+            }
+            case 8 -> {
+                SafetyProtocol<FactoryEquipment> p = new SafetyProtocol<>(
+                        "Проверка датчиков (Вариант 8)",
+                        eq -> eq.isWorking() && eq.getTemperature() == 0.0,
+                        eq -> eq.setTemperature(25.0)
+                );
+                manager.addProtocol(p);
+                System.out.println("Добавлен протокол: Проверка датчиков.");
+            }
+            default -> System.out.println("Вариант не поддерживается.");
+        }
+    }
+
+    // ================= ПУНКТ 6 — АНАЛИТИКА ВАРИАНТОВ 1–8 =================
+    private static void runVariantAnalytics(FactoryManager manager) {
+        switch (variant) {
+            case 1 -> {
+                boolean result = manager.getAnalyticsStream()
+                        .anyMatch(eq -> eq.getTemperature() > 150.0);
+                System.out.println("Есть оборудование с температурой > 150.0°C: " + result);
+            }
+            case 2 -> {
+                String result = manager.getAnalyticsStream()
+                        .filter(FactoryEquipment::isWorking)
+                        .map(FactoryEquipment::getName)
+                        .collect(Collectors.joining(", "));
+                System.out.println("Работающее оборудование: " + (result.isEmpty() ? "(нет)" : result));
+            }
+            case 3 -> {
+                Map<String, Long> counts = manager.getAnalyticsStream()
+                        .collect(Collectors.groupingBy(
+                                eq -> eq.getClass().getSimpleName(),
+                                Collectors.counting()
+                        ));
+                System.out.println("Количество оборудования по классам:");
+                counts.forEach((k, v) -> System.out.println("  " + k + ": " + v));
+            }
+            case 4 -> {
+                Map<Boolean, List<FactoryEquipment>> grouped = manager.getAnalyticsStream()
+                        .collect(Collectors.groupingBy(FactoryEquipment::isWorking));
+                System.out.println("Группировка по статусу:");
+                grouped.forEach((working, list) -> {
+                    System.out.println("  " + (working ? "Работает" : "Остановлено") + ":");
+                    list.forEach(eq -> System.out.println("    " + eq.getDetails()));
+                });
+            }
+            case 5 -> {
+                double sum = manager.getAnalyticsStream()
+                        .filter(FactoryEquipment::isWorking)
+                        .mapToDouble(FactoryEquipment::getTemperature)
+                        .sum();
+                System.out.printf("Суммарный нагрев работающего оборудования: %.2f°C%n", sum);
+            }
+            case 6 -> {
+                List<String> result = manager.getWorkshops().entrySet().stream()
+                        .filter(entry -> entry.getValue().stream()
+                                .anyMatch(eq -> !eq.isWorking()))
+                        .map(Map.Entry::getKey)
+                        .collect(Collectors.toList());
+                System.out.println("Цеха с остановленным оборудованием: " + result);
+            }
+            case 7 -> {
+                Optional<FactoryEquipment> min = manager.getAnalyticsStream()
+                        .filter(FactoryEquipment::isWorking)
+                        .min(Comparator.comparingDouble(FactoryEquipment::getTemperature));
+                if (min.isPresent()) {
+                    System.out.println("Самое холодное работающее оборудование:");
+                    System.out.println("  " + min.get().getDetails());
+                } else {
+                    System.out.println("Нет работающего оборудования.");
+                }
+            }
+            case 8 -> {
+                System.out.println("ТОП-3 самого горячего оборудования:");
+                manager.getAnalyticsStream()
+                        .sorted(Comparator.comparingDouble(FactoryEquipment::getTemperature).reversed())
+                        .limit(3)
+                        .forEach(eq -> System.out.println("  " + eq.getDetails()));
+            }
+            default -> System.out.println("Вариант не поддерживается.");
+        }
+    }
+
+    // ================= Описания вариантов =================
+    private static String getVariantDescription(int v) {
+        return switch (v) {
+            case 1 -> "Перегрев робота / anyMatch temp > 150";
+            case 2 -> "Безопасная скорость / joining имён работающих";
+            case 3 -> "Сброс давления / count по классам";
+            case 4 -> "Экстренная остановка / группировка по статусу";
+            case 5 -> "Очистка захвата / сумма температур работающих";
+            case 6 -> "Профилактика конвейеров / список цехов с остановленным";
+            case 7 -> "Защита пресса / min температура среди работающих";
+            case 8 -> "Проверка датчиков / ТОП-3 по температуре";
+            default -> "Неизвестный вариант";
+        };
+    }
+}
